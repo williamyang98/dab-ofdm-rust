@@ -1,0 +1,8 @@
+/target
+*.ini
+*.log
+/data
+/build-out
+/.vscode
+
+Cargo.lock

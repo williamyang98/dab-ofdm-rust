@@ -1,0 +1,14 @@
+[package]
+name = "ofdm_demod"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.3.5", features = ["derive"] }
+eframe = "0.22.0"
+egui = "0.22.0"
+num = "0.4.0"
+ofdm = { version = "0.1.0", path = "../../crates/ofdm" }
+dab_core = { version = "0.1.0", path = "../../crates/dab_core" }
+dab_ofdm = { version = "0.1.0", path = "../../crates/dab_ofdm" }
+app_helpers = { version = "0.1.0", path = "../app_helpers" }
