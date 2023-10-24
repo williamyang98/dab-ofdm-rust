@@ -22,7 +22,7 @@ pub enum BarrierError {
 ///     move || {
 ///         barrier.wait(|state| *state).unwrap();
 ///         println!("[thread-0] passed barrier");
-///         barrier.acquire().set(false).unwrap();
+///         barrier.set(false).unwrap();
 ///         println!("[thread-0] updated barrier");
 ///     }
 /// });
@@ -31,7 +31,7 @@ pub enum BarrierError {
 ///     let barrier = barrier.clone();
 ///     move || {
 ///         // Acquire lets use get a mutable reference through Arc<>
-///         barrier.acquire().set(true).unwrap();
+///         barrier.set(true).unwrap();
 ///         println!("[thread-1] updated barrier");
 ///         barrier.wait(|state| !*state).unwrap();
 ///         println!("[thread-1] passed barrier");
@@ -58,13 +58,13 @@ impl<T> Barrier<T> {
     }
 
     /// Forcefully updates all threads waiting for an update.
-    pub fn notify_all(&mut self) {
+    pub fn notify_all(&self) {
         self.on_change.notify_all();
     }
 
     /// Close the barrier.
     /// If there are threads waiting for or updating the barrier they will get a Closed error.
-    pub fn close(&mut self) -> Result<(),BarrierError> {
+    pub fn close(&self) -> Result<(),BarrierError> {
         let mut is_closed = self.is_closed.write().unwrap();
         if *is_closed {
             return Err(BarrierError::Closed);
@@ -72,13 +72,6 @@ impl<T> Barrier<T> {
         *is_closed = true;
         self.on_change.notify_all();
         Ok(())
-    }
-
-    /// Gets a mutable reference to the barrier through a mutable access.
-    /// This code should be safe since we prevent data races with locks in all mutable methods.
-    /// This allows for multiple owners to update the internal state through something like Arc.
-    pub fn acquire<'a>(&'a self) -> &'a mut Self {
-        unsafe { &mut *(self as *const Self as *mut Self) }
     }
 }
 
@@ -102,7 +95,7 @@ impl<T> Barrier<T> where T: PartialEq {
     }
 
     /// Updates the barrier with a new value and notifies all threads waiting on the barrier.
-    pub fn set(&mut self, new_data: T) -> Result<(),BarrierError> {
+    pub fn set(&self, new_data: T) -> Result<(),BarrierError> {
         if *self.is_closed.read().unwrap() {
             return Err(BarrierError::Closed);
         }

@@ -165,14 +165,13 @@ pub fn get_dab_ofdm_phase_reference_symbol_fft(prs_fft: &mut[Complex<f32>], tran
             let phase = FRAC_PI_2 * (phase_multiple as f32);
             let prs = Complex::<f32>::cis(phase);
             
-            let fft_index: i32;
-            // -F/2 <= f < 0
-            if fft_bin < 0 {
-                fft_index = fft_bin + (total_fft as i32);
-            // 0 < f <= F/2
+            let fft_index: i32 = if fft_bin < 0 {
+                // -F/2 <= f < 0
+                fft_bin + (total_fft as i32)
             } else {
-                fft_index = fft_bin;
-            }
+                // 0 < f <= F/2
+                fft_bin
+            };
             prs_fft[fft_index as usize] = prs;
         }
     }

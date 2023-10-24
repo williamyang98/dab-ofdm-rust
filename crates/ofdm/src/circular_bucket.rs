@@ -28,23 +28,23 @@ impl<T> CircularBucket<T> {
     }
 
     /// Returns immutable iterator to valid data and wraps around as a circular buffer.
-    pub fn iter<'a>(&'a self) -> Iter<'a,T> {
+    pub fn iter(&self) -> Iter<'_,T> {
         let capacity = self.capacity();
         Iter {
             data: &self.data,
             index: self.index,
-            capacity: capacity,
+            capacity,
             remain_length: self.length,
         }
     }
 
     /// Returns immutable iterator to valid data and wraps around as a circular buffer.
-    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a,T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_,T> {
         let capacity = self.capacity();
         IterMut {
             data: &mut self.data,
             index: self.index,
-            capacity: capacity,
+            capacity,
             remain_length: self.length,
         }
     }

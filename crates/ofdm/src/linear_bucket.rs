@@ -23,7 +23,7 @@ impl<T> LinearBucket<T> {
     }
 
     pub fn is_full(&self) -> bool {
-        return self.length == self.capacity()
+        self.length == self.capacity()
     }
 
     /// Returns immutable slice to valid data.

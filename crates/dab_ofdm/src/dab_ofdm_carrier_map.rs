@@ -30,15 +30,14 @@ pub fn get_dab_ofdm_carrier_map(carrier_map: &mut[usize], total_fft: usize) {
         // -F <= f <= F where f =/= 0
         if fft_index < fft_index_start || fft_index > fft_index_end || fft_index == fft_index_dc {
             continue;
-        } 
+        };
 
-        let carrier_out_index: usize; 
-        if fft_index < fft_index_dc {
-            carrier_out_index = fft_index-fft_index_start;
+        let carrier_out_index: usize = if fft_index < fft_index_dc {
+            fft_index-fft_index_start
         } else {
             // NOTE: We ignore the DC bin so we adjust FFT bins above DC
-            carrier_out_index = fft_index-fft_index_start-1;   
-        }
+            fft_index-fft_index_start-1
+        };
         carrier_map[carrier_map_index] = carrier_out_index;
         carrier_map_index += 1;
     }

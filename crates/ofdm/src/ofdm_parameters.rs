@@ -56,16 +56,16 @@ impl OfdmParameters {
         let nb_output_bits = nb_output_samples*2;
 
         Self {
-            nb_symbols: nb_symbols,
-            nb_null_period: nb_null_period,
-            nb_symbol_period: nb_symbol_period,
-            nb_fft: nb_fft,
-            nb_fft_data_carriers: nb_fft_data_carriers,
-            nb_cyclic_prefix: nb_cyclic_prefix,
-            nb_dqpsk_symbols: nb_dqpsk_symbols,
-            nb_output_samples: nb_output_samples,
-            nb_output_bits: nb_output_bits,
-            nb_input_samples: nb_input_samples,
+            nb_symbols,
+            nb_null_period,
+            nb_symbol_period,
+            nb_fft,
+            nb_fft_data_carriers,
+            nb_cyclic_prefix,
+            nb_dqpsk_symbols,
+            nb_output_samples,
+            nb_output_bits,
+            nb_input_samples,
         }
     }
 

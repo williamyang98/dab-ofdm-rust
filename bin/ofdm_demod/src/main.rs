@@ -6,7 +6,6 @@ use std::io::{Read, Write, BufWriter};
 use std::sync::{Arc, RwLock};
 use num::complex::Complex32;
 use clap::Parser;
-use eframe;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -47,14 +46,14 @@ fn main() -> Result<(), String> {
     };
     let mut input_file: Box<dyn Read + Send + Sync> = match &args.input_filepath {
         None => Box::new(std::io::stdin()),
-        Some(filepath) => match std::fs::File::open(&filepath) {
+        Some(filepath) => match std::fs::File::open(filepath) {
             Ok(file) => Box::new(file),
             Err(err) => return Err(format!("Failed to open input file {}: {}", filepath, err)),
         },
     };
     let mut output_file: Box<dyn Write + Send + Sync> = match &args.output_filepath {
         None => Box::new(BufWriter::new(std::io::stdout())),
-        Some(filepath) => match std::fs::File::create(&filepath) {
+        Some(filepath) => match std::fs::File::create(filepath) {
             Ok(file) => Box::new(BufWriter::new(file)),
             Err(err) => return Err(format!("Failed to open file {}: {}", filepath, err)),
         },
@@ -119,7 +118,7 @@ fn main() -> Result<(), String> {
         move |x: &[i8]| {
             let soft_bits = &mut *output_buffer.write().unwrap();
             soft_bits.copy_from_slice(x);
-            if let Err(err) = output_buffer_barrier.acquire().set(true) {
+            if let Err(err) = output_buffer_barrier.set(true) {
                 eprintln!("[reader_thread_bits_out] Output buffer couldn't be updated: {:?}", err);
             }
         }
@@ -142,7 +141,7 @@ fn main() -> Result<(), String> {
                     eprintln!("[writer_thread] Error while writing: {}", err);
                     break;
                 }
-                if let Err(err) = output_buffer_barrier.acquire().set(false) {
+                if let Err(err) = output_buffer_barrier.set(false) {
                     eprintln!("[writer_thread] Output buffer couldn't be released: {:?}", err);
                     break;
                 }
@@ -154,12 +153,12 @@ fn main() -> Result<(), String> {
     if let Err(err) = launch_gui(ofdm_demodulator.clone()) {
         return Err(format!("[gui_thread] Error while running: {}", err));
     }
-    output_buffer_barrier.acquire().close().unwrap();
-    if let Err(_) = reader_thread.join() {
-        return Err("Reader thread should terminate gracefully".to_string());
+    output_buffer_barrier.close().unwrap();
+    if let Err(err) = reader_thread.join() {
+        return Err(format!("Reader thread should terminate gracefully: {:?}", err));
     };
-    if let Err(_) = writer_thread.join() {
-        return Err("Writer thread should terminate gracefully".to_string());
+    if let Err(err) = writer_thread.join() {
+        return Err(format!("Writer thread should terminate gracefully: {:?}", err));
     }
     Ok(())
 }

@@ -138,7 +138,7 @@ impl OfdmDemodulator {
         let mut demodulator = Self {
             state: OfdmDemodulatorState::FindingNullPowerDip,
             settings: OfdmDemodulatorSettings::default(),
-            params: params.clone(),
+            params: *params,
             // initial state
             total_frames_read: 0,
             total_frames_desync: 0,
@@ -150,8 +150,8 @@ impl OfdmDemodulator {
             is_null_end_found: false,
             signal_l1_average: 0.0,
             // fft
-            fft: fft,
-            ifft: ifft,
+            fft,
+            ifft,
             // data
             carrier_mapper_data: carrier_mapper.to_vec(),
             correlation_prs_fft_data: vec![Complex32::default(); params.nb_fft],
@@ -170,14 +170,14 @@ impl OfdmDemodulator {
             bits_out_callbacks: vec![],
         };
 
-        demodulator.init(&prs_fft);
+        demodulator.init(prs_fft);
         demodulator
     }
 
     fn init(&mut self, prs_fft: &[Complex32]) {
         assert!(prs_fft.len() == self.params.nb_fft, "PRS FFT must have {} samples but got {} samples", self.params.nb_fft, prs_fft.len());
 
-        self.correlation_prs_time_data.copy_from_slice(&prs_fft);
+        self.correlation_prs_time_data.copy_from_slice(prs_fft);
         calculate_relative_phase(&mut self.correlation_prs_time_data);
         self.ifft.process(&mut self.correlation_prs_time_data);
 
@@ -203,7 +203,7 @@ impl OfdmDemodulator {
         self.update_signal_power_average(buf);
 
         let mut curr_buf = buf;
-        while curr_buf.len() > 0 {
+        while !curr_buf.is_empty() {
             let total_read = match self.state {
                 OfdmDemodulatorState::FindingNullPowerDip                   =>   self.find_null_power_dip(curr_buf),
                 OfdmDemodulatorState::ReadingNullAndPrs                     =>   self.read_null_prs(curr_buf),
@@ -259,7 +259,7 @@ impl OfdmDemodulator {
 
         // We ignore the remaining buffer until there are enough samples for analysis
         if !self.is_null_end_found {
-            self.null_power_dip_buffer.consume(&buf, true);
+            self.null_power_dip_buffer.consume(buf, true);
             return buf.len();
         }
 
@@ -270,7 +270,7 @@ impl OfdmDemodulator {
         self.null_power_dip_buffer.consume(consumed_blocks, true);
         self.null_prs_buffer.reset();
         self.null_prs_buffer.consume_from_iterator(
-            self.null_power_dip_buffer.iter().map(|x| *x)
+            self.null_power_dip_buffer.iter().copied()
         );
 
 
@@ -303,7 +303,7 @@ impl OfdmDemodulator {
 
         // To mitigate effect of phase shifts we instead correlate the complex difference between consecutive FFT bins
         // arg(~z0*z1) = arg(z1)-arg(z0)
-        self.temp_fft_buffer.copy_from_slice(&prs_fft);
+        self.temp_fft_buffer.copy_from_slice(prs_fft);
         self.fft.process(&mut self.temp_fft_buffer);
         calculate_relative_phase(&mut self.temp_fft_buffer);
         self.ifft.process(&mut self.temp_fft_buffer);
@@ -384,7 +384,7 @@ impl OfdmDemodulator {
                 // This causes spurious desyncs when one of these other peaks are very far away
                 // Thus we weigh the value of the peak with its distance from the expected location
                 let expected_peak_x = self.params.nb_cyclic_prefix;
-                let distance_from_expectation = (expected_peak_x as i32 - i as i32).abs() as i32;
+                let distance_from_expectation = (expected_peak_x as i32 - i as i32).abs();
                 let norm_distance = (distance_from_expectation as f32) / (self.params.nb_symbol_period as f32);
                 let decay_weight = 1.0 - self.settings.fine_time_impulse_peak_distance_probability;
                 let probability = 1.0 - decay_weight * norm_distance;
@@ -446,13 +446,13 @@ impl OfdmDemodulator {
         self.null_prs_buffer.consume(null_symbol);
 
         let net_frequency_offset = self.fine_frequency_offset + self.coarse_frequency_offset;
-        apply_pll(&mut self.data_time_buffer.iter_mut(), net_frequency_offset);
+        apply_pll(self.data_time_buffer.iter_mut(), net_frequency_offset);
 
         // Clause 3.13: Frequency offset estimation and correction
         // Clause 3.13.1 - Fraction frequency offset estimation
         let total_phase_error: f32 = (0..self.params.nb_symbols)
             .map(|i| &self.data_time_buffer[chunk_slice(i, self.params.nb_symbol_period)])
-            .map(|sym| calculate_cyclic_phase_error(&sym, self.params.nb_cyclic_prefix))
+            .map(|sym| calculate_cyclic_phase_error(sym, self.params.nb_cyclic_prefix))
             .sum();
         let average_phase_error = total_phase_error / (self.params.nb_symbols as f32);
 
@@ -479,7 +479,7 @@ impl OfdmDemodulator {
         // Clause 3.15 - Differential demodulator
         (0..self.params.nb_dqpsk_symbols)
             .for_each(|i| {
-                let x0 = &self.data_fft_buffer[chunk_slice(i+0, self.params.nb_fft)];
+                let x0 = &self.data_fft_buffer[chunk_slice(i  , self.params.nb_fft)];
                 let x1 = &self.data_fft_buffer[chunk_slice(i+1, self.params.nb_fft)];
                 let y = &mut self.data_dqpsk_buffer[chunk_slice(i, self.params.nb_fft_data_carriers)];
                 calculate_dqpsk(&self.params, x0, x1, y);
@@ -530,7 +530,7 @@ impl OfdmDemodulator {
 
         // TODO: If we are planning on multithreading this then we need to lock the fine frequency offset
         self.fine_frequency_offset += delta;
-        self.fine_frequency_offset = self.fine_frequency_offset % fft_bin_wrap;
+        self.fine_frequency_offset %= fft_bin_wrap;
     }
 }
 
@@ -539,8 +539,7 @@ fn calculate_l1_average(block: &[Complex32]) -> f32 {
         .iter()
         .map(|x| x.l1_norm())
         .sum();
-    let l1_block_average = l1_sum / (block.len() as f32);
-    l1_block_average
+    l1_sum / (block.len() as f32)
 }
 
 fn calculate_relative_phase(x: &mut[Complex32]) {
@@ -575,7 +574,7 @@ fn apply_pll(x: &mut [Complex32], freq_offset_normalised: f32) {
             dt % TWO_PI
         };
         let pll = Complex32::cis(dt);
-        x[i] = x[i] * pll;
+        x[i] *= pll;
     }
 }
 
@@ -590,8 +589,7 @@ fn calculate_cyclic_phase_error(x: &[Complex32], prefix_length: usize) -> f32 {
         .map(|i| suffix[i] * prefix[i].conj())
         .sum();
 
-    let phase_error = conjugate_sum.im.atan2(conjugate_sum.re);
-    phase_error
+    conjugate_sum.im.atan2(conjugate_sum.re)
 }
 
 fn calculate_dqpsk(params: &OfdmParameters, x0: &[Complex32], x1: &[Complex32], y: &mut[Complex32]) {
@@ -626,7 +624,7 @@ fn calculate_soft_bits(carrier_mapper: &[usize], x: &[Complex32], y: &mut[i8]) {
         //            But with L2 norm, we get b0=0.707*A, b1=0.707*A
         //                with L1 norm, we get b0=A, b1=A as expected
         let amplitude = vec.re.abs().max(vec.im.abs());
-        vec = vec / amplitude;
+        vec /= amplitude;
         
         y[i]        = quantise_to_soft_bit( vec.re);
         y[i+length] = quantise_to_soft_bit(-vec.im);
