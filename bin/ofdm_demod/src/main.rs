@@ -22,6 +22,9 @@ struct AppArguments {
     /// Output filepath. If not provided uses stdout by default.
     #[arg(short, long)]
     output_filepath: Option<String>,
+    /// Start the application without a GUI
+    #[arg(long)]
+    nogui: bool,
 }
 
 struct AppGui {
@@ -74,23 +77,23 @@ fn main() -> Result<(), String> {
     let bytes_per_sample = 2;
     let mut input_bytes_buffer = vec![0u8; number_of_input_samples*bytes_per_sample];
     let mut input_samples_buffer = vec![Complex32::default(); number_of_input_samples];
-    let output_buffer = Arc::new(RwLock::new(vec![0i8; ofdm_params.nb_output_bits]));
-    let output_buffer_barrier = Arc::new(Barrier::new(false));
+    let intermediate_buffer = Arc::new(RwLock::new(vec![0i8; ofdm_params.nb_output_bits]));
+    let intermediate_buffer_barrier = Arc::new(Barrier::new(false));
 
     // Setup threads
     let reader_thread = std::thread::spawn({
         let ofdm_demodulator = ofdm_demodulator.clone();
-        let output_buffer_barrier = output_buffer_barrier.clone();
+        let intermediate_buffer_barrier = intermediate_buffer_barrier.clone();
         move || {
             loop {
                 let total_samples = match input_file.read(&mut input_bytes_buffer) {
                     Ok(0) => {
-                        eprintln!("[reader_thread] Finished reading samples");
+                        eprintln!("[reader_thread] Finished reading samples from input");
                         break;
                     },
                     Ok(length) => length/bytes_per_sample,
                     Err(err) => {
-                        eprintln!("[reader_thread] Error while reading: {}", err);
+                        eprintln!("[reader_thread] Error while reading from input: {}", err);
                         break;
                     },
                 };
@@ -102,63 +105,79 @@ fn main() -> Result<(), String> {
                         input_samples_buffer[i].re = x[0] as f32 - dc_offset;
                         input_samples_buffer[i].im = x[1] as f32 - dc_offset;
                     });
-                if let Err(err) = output_buffer_barrier.wait(|is_full| !is_full) {
-                    eprintln!("[reader_thread] Output buffer stopped responding: {:?}", err);
+                if let Err(err) = intermediate_buffer_barrier.wait(|is_full| !is_full) {
+                    eprintln!("[reader_thread] Intermediate buffer stopped responding: {:?}", err);
                     break;
                 }
                 ofdm_demodulator.write().unwrap().process(&input_samples_buffer[..total_samples]);
+            }
+            if let Err(err) = intermediate_buffer_barrier.close() {
+                eprintln!("[reader_thread] Error while closing intermediate buffer: {:?}", err);
+            } else {
+                eprintln!("[reader_thread] Successfully closed intermediate buffer");
             }
         }
     });
 
     // This callback is invoked through ofdm_demod.process(...) in the same thread
     ofdm_demodulator.write().unwrap().subscribe_bits_out({
-        let output_buffer = output_buffer.clone();
-        let output_buffer_barrier = output_buffer_barrier.clone();
+        let intermediate_buffer = intermediate_buffer.clone();
+        let intermediate_buffer_barrier = intermediate_buffer_barrier.clone();
         move |x: &[i8]| {
-            let soft_bits = &mut *output_buffer.write().unwrap();
+            let soft_bits = &mut *intermediate_buffer.write().unwrap();
             soft_bits.copy_from_slice(x);
-            if let Err(err) = output_buffer_barrier.set(true) {
-                eprintln!("[reader_thread_bits_out] Output buffer couldn't be updated: {:?}", err);
+            if let Err(err) = intermediate_buffer_barrier.set(true) {
+                eprintln!("[reader_thread_bits_out] Intermediate buffer couldn't be updated: {:?}", err);
             }
         }
     });
 
     let writer_thread = std::thread::spawn({
-        let output_buffer = output_buffer.clone();
-        let output_buffer_barrier = output_buffer_barrier.clone();
+        let intermediate_buffer = intermediate_buffer.clone();
+        let intermediate_buffer_barrier = intermediate_buffer_barrier.clone();
         move || {
             loop {
-                if let Err(err) = output_buffer_barrier.wait(|is_full| *is_full) {
-                    eprintln!("[writer_thread] Output buffer stopped responding: {:?}", err);
+                if let Err(err) = intermediate_buffer_barrier.wait(|is_full| *is_full) {
+                    eprintln!("[writer_thread] Intermediate buffer stopped responding: {:?}", err);
                     break;
                 }
-                let soft_bits = &*output_buffer.read().unwrap();
+                let soft_bits = &*intermediate_buffer.read().unwrap();
                 let data_out = unsafe { 
                     std::slice::from_raw_parts(soft_bits.as_ptr() as *const u8, soft_bits.len()) 
                 };
                 if let Err(err) = output_file.write_all(data_out) {
-                    eprintln!("[writer_thread] Error while writing: {}", err);
+                    eprintln!("[writer_thread] Error while writing to output: {}", err);
                     break;
                 }
-                if let Err(err) = output_buffer_barrier.set(false) {
-                    eprintln!("[writer_thread] Output buffer couldn't be released: {:?}", err);
+                if let Err(err) = intermediate_buffer_barrier.set(false) {
+                    eprintln!("[writer_thread] Intermediate buffer couldn't be released: {:?}", err);
                     break;
                 }
+            }
+            if let Err(err) = intermediate_buffer_barrier.close() {
+                eprintln!("[writer_thread] Error while closing intermediate buffer: {:?}", err);
+            } else {
+                eprintln!("[writer_thread] Successfully closed intermediate buffer");
             }
         }
     });
 
     // Handle closing
-    if let Err(err) = launch_gui(ofdm_demodulator.clone()) {
-        return Err(format!("[gui_thread] Error while running: {}", err));
+    if !args.nogui {
+        if let Err(err) = launch_gui(ofdm_demodulator.clone()) {
+            eprintln!("[main_thread] Error while running gui: {}", err);
+        }
+        if let Err(err) = intermediate_buffer_barrier.close() {
+            eprintln!("[main_thread] Error while closing intermediate buffer: {:?}", err);
+        } else {
+            eprintln!("[main_thread] Successfully closed intermediate buffer");
+        }
     }
-    output_buffer_barrier.close().unwrap();
     if let Err(err) = reader_thread.join() {
-        return Err(format!("Reader thread should terminate gracefully: {:?}", err));
+        eprintln!("[main_thread] Reader thread should terminate gracefully: {:?}", err);
     };
     if let Err(err) = writer_thread.join() {
-        return Err(format!("Writer thread should terminate gracefully: {:?}", err));
+        eprintln!("[main_thread] Writer thread should terminate gracefully: {:?}", err);
     }
     Ok(())
 }
