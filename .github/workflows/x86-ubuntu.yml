@@ -1,0 +1,43 @@
+name: x86-ubuntu
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master", "main", "dev" ]
+
+jobs:
+  skip_check:
+    continue-on-error: false
+    runs-on: ubuntu-22.04
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+    - id: skip_check
+      uses: fkirc/skip-duplicate-actions@v5
+      with:
+        concurrent_skipping: 'same_content'
+        cancel_others: 'true'
+        skip_after_successful_duplicate: 'true'
+        paths_ignore: '["**/README.md", "**/docs/**", "**/LICENSE.txt"]'
+        do_not_skip: '["workflow_dispatch", "schedule"]'
+
+  build:
+    needs: skip_check
+    if: needs.skip_check.outputs.should_skip != 'true'
+
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v3
+      with: 
+        submodules: recursive 
+
+    - name: Build
+      shell: bash
+      run: cargo build -r
+
+    - name: Upload files (Release) 
+      uses: actions/upload-artifact@v3
+      with:
+        name: dab_ofdm_rust_ubuntu_x64
+        path: ${{github.workspace}}/target/release/ofdm_demod

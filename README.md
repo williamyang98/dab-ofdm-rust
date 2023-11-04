@@ -1,4 +1,7 @@
 # Introduction
+[![x86-windows](https://github.com/FiendChain/dab-ofdm-rust/actions/workflows/x86-windows.yml/badge.svg)](https://github.com/FiendChain/dab-ofdm-rust/actions/workflows/x86-windows.yml)
+[![x86-ubuntu](https://github.com/FiendChain/dab-ofdm-rust/actions/workflows/x86-ubuntu.yml/badge.svg)](https://github.com/FiendChain/dab-ofdm-rust/actions/workflows/x86-ubuntu.yml)
+
 A rust port of the OFDM demodulator for DAB radio found at [FiendChain/DAB-Radio](https://github.com/FiendChain/DAB-Radio). It is intended to be used as a direct replacement for <code>ofdm_demod_gui.exe</code>, found [here](https://github.com/FiendChain/DAB-Radio/tree/master/src/examples).
 
 It is slower than the C++ version due to the lack of SIMD acceleration. This serves as a test project for the Rust programming language.
