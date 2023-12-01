@@ -572,7 +572,7 @@ fn calculate_magnitude_spectrum(x: &[Complex32], y: &mut[f32]) {
 }
 
 // SOURCE: https://www.embeddedrelated.com/showarticle/152.php
-//         Chebyshev polynomial which is accurate between -2PI to +2PI
+//         Chebyshev polynomial which is accurate between -1.5PI to +1.5PI
 fn fast_sine(x: f32) -> f32 {
     const A0: f32 = -0.10132118;          // x
     const A1: f32 =  0.0066208798;        // x^3
@@ -595,25 +595,16 @@ fn fast_sine(x: f32) -> f32 {
 
 fn apply_pll(x: &mut [Complex32], freq_offset_normalised: f32) {
     use std::f32::consts::PI;
-    const TWO_PI: f32 = PI * 2.0;
-    let dt_step = TWO_PI * freq_offset_normalised;
-    
-    // apply pll in separate blocks where the range of our fast_sine implementation is accurate to avoid introducing noise
-    const WRAP_THRESHOLD: f32 = TWO_PI - PI/2.0; 
-    let block_size = (WRAP_THRESHOLD / dt_step).abs().ceil() as usize;
-    let block_size = block_size.min(x.len()).max(1usize);
-    x.chunks_mut(block_size).enumerate().for_each(|(i, block)| {
-        let start_index = i*block_size;
-        // f32 mod is a very expensive operation which is why we break it up into blocks
-        let dt_offset = (start_index as f32)*dt_step % TWO_PI;
-        block.iter_mut().enumerate().for_each(|(block_index,x)| {
-            let dt_block = (block_index as f32)*dt_step;
-            let dt = dt_offset + dt_block;
-            let sin = fast_sine(dt);
-            let cos = fast_sine(dt + PI/2.0);
-            let pll = Complex32::new(cos, sin);
-            *x *= pll;
-        });
+    const TWO_PI: f32 = 2.0*PI;
+    x.iter_mut().enumerate().for_each(|(i, x)| {
+        let dt = (i as f32)*freq_offset_normalised;
+        let dt_correct = (dt.abs() - 0.5).ceil();   // get absolute integer offset from [-0.5,+0.5]
+        let dt = dt - dt_correct*dt.signum();       // translate to [-0.5,+0.5]
+        let dt = TWO_PI*dt;                         // map to [-PI,+PI]
+        let sin = fast_sine(dt);                    // occupies [-PI,+PI]
+        let cos = fast_sine(dt + PI/2.0);           // occupies [-0.5*PI,+1.5PI]
+        let pll = Complex32::new(cos, sin);
+        *x *= pll;
     });
 }
 
