@@ -631,6 +631,7 @@ fn calculate_cyclic_phase_error(x: &[Complex32], prefix_length: usize) -> f32 {
 fn calculate_dqpsk(params: &OfdmParameters, x0: &[Complex32], x1: &[Complex32], y: &mut[Complex32]) {
     let nb_fft = params.nb_fft;
     let nb_data = params.nb_fft_data_carriers;
+    let nb_data_half = nb_data/2;
 
     assert!(x0.len() == nb_fft, "x0 ({}) has different length to the fft ({})", x0.len(), nb_fft);
     assert!(x1.len() == nb_fft, "x1 ({}) has different length to the fft ({})", x1.len(), nb_fft);
@@ -642,15 +643,15 @@ fn calculate_dqpsk(params: &OfdmParameters, x0: &[Complex32], x1: &[Complex32], 
     // y is the DQPSK for the frequency range [-Fa,0)+(0,Fa] => [2Fs-Fa,2Fs), (0,Fa]
 
     // [-Fa,0) => [2Fs-Fa,2Fs)
-    for i in 0..nb_data/2 {
+    for i in 0..nb_data_half {
         let dqpsk_index = i;
-        let fft_index = nb_fft-i-1;
+        let fft_index = nb_fft-nb_data_half+i;
         let phase_delta = x0[fft_index] * x1[fft_index].conj();
         y[dqpsk_index] = phase_delta;
     }
     // (0,Fa] => (0,Fa]
-    for i in 0..nb_data/2 {
-        let dqpsk_index = i + nb_data/2;
+    for i in 0..nb_data_half {
+        let dqpsk_index = i + nb_data_half;
         let fft_index = 1+i;
         let phase_delta = x0[fft_index] * x1[fft_index].conj();
         y[dqpsk_index] = phase_delta;
