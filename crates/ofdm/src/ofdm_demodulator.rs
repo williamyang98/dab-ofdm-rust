@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::cmp::Ordering;
 use num::complex::Complex32;
 use rustfft::{FftPlanner, Fft};
+use itertools::izip;
 
 #[derive(Debug)]
 pub struct OfdmDemodulatorSettings {
@@ -310,8 +311,11 @@ impl OfdmDemodulator {
 
         // Correlation in frequency domain is multiplication in time domain
         // NOTE: PRS time data is already conjugate in self.init()
-        for i in 0..self.params.nb_fft {
-            self.temp_fft_buffer[i] *= self.correlation_prs_time_data[i];
+        for (x,y) in izip!(
+            self.correlation_prs_time_data.iter().take(self.params.nb_fft), 
+            self.temp_fft_buffer.iter_mut().take(self.params.nb_fft),
+        ) {
+            *y *= *x;
         }
         self.fft.process(&mut self.temp_fft_buffer);
         calculate_magnitude_spectrum(&self.temp_fft_buffer, &mut self.coarse_frequency_impulse_response_buffer);
@@ -365,14 +369,19 @@ impl OfdmDemodulator {
         // Perform impulse correlation in time domain using multiplication in frequency domain
         // NOTE: Our PRS FFT reference was conjugated in self.init()
         self.fft.process(&mut self.temp_fft_buffer);
-        for i in 0..self.params.nb_fft {
-            self.temp_fft_buffer[i] *= self.correlation_prs_fft_data[i];
+        for (x,y) in izip!(
+            self.correlation_prs_fft_data.iter().take(self.params.nb_fft), 
+            self.temp_fft_buffer.iter_mut().take(self.params.nb_fft),
+        ) {
+            *y *= *x;
         }
         self.ifft.process(&mut self.temp_fft_buffer);
-        for i in 0..self.params.nb_fft {
-            let value = self.temp_fft_buffer[i];
-            let amplitude = value.norm().log10() * 20.0;
-            self.fine_time_impulse_response_buffer[i] = amplitude;
+        for (x,y) in izip!(
+            self.temp_fft_buffer.iter().take(self.params.nb_fft),
+            self.fine_time_impulse_response_buffer.iter_mut().take(self.params.nb_fft),
+        ) {
+            let amplitude = x.norm().log10() * 20.0;
+            *y = amplitude;
         }
 
         let (impulse_peak_index, impulse_peak_value) = self.fine_time_impulse_response_buffer
@@ -562,20 +571,50 @@ fn calculate_magnitude_spectrum(x: &[Complex32], y: &mut[f32]) {
     }
 }
 
+// SOURCE: https://www.embeddedrelated.com/showarticle/152.php
+//         Chebyshev polynomial which is accurate between -2PI to +2PI
+fn fast_sine(x: f32) -> f32 {
+    const A0: f32 = -0.10132118;          // x
+    const A1: f32 =  0.0066208798;        // x^3
+    const A2: f32 = -0.00017350505;       // x^5
+    const A3: f32 =  0.0000025222919;     // x^7
+    const A4: f32 = -0.000000023317787;   // x^9
+    const A5: f32 =  0.00000000013291342; // x^11
+
+    let pi_major = 3.1415927f32;
+    let pi_minor = -0.00000008742278f32;
+    let x2 = x*x;
+    let p11 = A5;
+    let p9  = p11*x2 + A4;
+    let p7  = p9*x2  + A3;
+    let p5  = p7*x2  + A2;
+    let p3  = p5*x2  + A1;
+    let p1  = p3*x2  + A0;
+    (x-pi_major-pi_minor) * (x+pi_major+pi_minor) * p1 * x
+}
+
 fn apply_pll(x: &mut [Complex32], freq_offset_normalised: f32) {
     use std::f32::consts::PI;
     const TWO_PI: f32 = PI * 2.0;
-    let length = x.len();
-
     let dt_step = TWO_PI * freq_offset_normalised;
-    for i in 0..length {
-        let dt = {
-            let dt = (i as f32)*dt_step;
-            dt % TWO_PI
-        };
-        let pll = Complex32::cis(dt);
-        x[i] *= pll;
-    }
+    
+    // apply pll in separate blocks where the range of our fast_sine implementation is accurate to avoid introducing noise
+    const WRAP_THRESHOLD: f32 = TWO_PI - PI/2.0; 
+    let block_size = (WRAP_THRESHOLD / dt_step).abs().ceil() as usize;
+    let block_size = block_size.min(x.len()).max(1usize);
+    x.chunks_mut(block_size).enumerate().for_each(|(i, block)| {
+        let start_index = i*block_size;
+        // f32 mod is a very expensive operation which is why we break it up into blocks
+        let dt_offset = (start_index as f32)*dt_step % TWO_PI;
+        block.iter_mut().enumerate().for_each(|(block_index,x)| {
+            let dt_block = (block_index as f32)*dt_step;
+            let dt = dt_offset + dt_block;
+            let sin = fast_sine(dt);
+            let cos = fast_sine(dt + PI/2.0);
+            let pll = Complex32::new(cos, sin);
+            *x *= pll;
+        });
+    });
 }
 
 fn calculate_cyclic_phase_error(x: &[Complex32], prefix_length: usize) -> f32 {
@@ -593,18 +632,31 @@ fn calculate_cyclic_phase_error(x: &[Complex32], prefix_length: usize) -> f32 {
 }
 
 fn calculate_dqpsk(params: &OfdmParameters, x0: &[Complex32], x1: &[Complex32], y: &mut[Complex32]) {
-    let m = (params.nb_fft_data_carriers/2) as isize;
-    let n = params.nb_fft as isize;
+    let nb_fft = params.nb_fft;
+    let nb_data = params.nb_fft_data_carriers;
 
-    let mut subcarrier_index: usize = 0;
-    for i in -m..=m {
-        if i == 0 {
-            continue;
-        }
-        let fft_index = ((n+i) % n) as usize;
+    assert!(x0.len() == nb_fft, "x0 ({}) has different length to the fft ({})", x0.len(), nb_fft);
+    assert!(x1.len() == nb_fft, "x1 ({}) has different length to the fft ({})", x1.len(), nb_fft);
+    assert!(y.len() == nb_data, "y ({}) has different length to the number of data carriers ({})", y.len(), nb_data);
+    assert!(nb_fft >= nb_data, "length of fft ({}) is less than number of required data carriers ({})", nb_fft, nb_data);
+    assert!(nb_data % 2 == 0, "number of data carriers must be even ({})", nb_data);
+
+    // x0,x1 are FFTs where [0,N] => [0,2Fs)
+    // y is the DQPSK for the frequency range [-Fa,0)+(0,Fa] => [2Fs-Fa,2Fs), (0,Fa]
+
+    // [-Fa,0) => [2Fs-Fa,2Fs)
+    for i in 0..nb_data/2 {
+        let dqpsk_index = i;
+        let fft_index = nb_fft-i-1;
         let phase_delta = x0[fft_index] * x1[fft_index].conj();
-        y[subcarrier_index] = phase_delta;
-        subcarrier_index += 1;
+        y[dqpsk_index] = phase_delta;
+    }
+    // (0,Fa] => (0,Fa]
+    for i in 0..nb_data/2 {
+        let dqpsk_index = i + nb_data/2;
+        let fft_index = 1+i;
+        let phase_delta = x0[fft_index] * x1[fft_index].conj();
+        y[dqpsk_index] = phase_delta;
     }
 }
 
