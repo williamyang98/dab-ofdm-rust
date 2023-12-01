@@ -598,11 +598,17 @@ fn apply_pll(x: &mut [Complex32], freq_offset_normalised: f32) {
     const TWO_PI: f32 = 2.0*PI;
     x.iter_mut().enumerate().for_each(|(i, x)| {
         let dt = (i as f32)*freq_offset_normalised;
-        let dt_correct = (dt.abs() - 0.5).ceil();   // get absolute integer offset from [-0.5,+0.5]
-        let dt = dt - dt_correct*dt.signum();       // translate to [-0.5,+0.5]
-        let dt = TWO_PI*dt;                         // map to [-PI,+PI]
-        let sin = fast_sine(dt);                    // occupies [-PI,+PI]
-        let cos = fast_sine(dt + PI/2.0);           // occupies [-0.5*PI,+1.5*PI]
+        // get absolute integer offset from [-0.5,+0.5]
+        // let dt = dt - dt.round();
+        // NOTE: Faster version of f32::round()
+        let dt_offset = dt.abs() - 0.5;
+        let dt_offset = dt_offset.ceil();
+        let dt_offset = dt_offset*dt.signum();
+
+        let dt = dt - dt_offset;          // translate to [-0.5,+0.5]
+        let dt = TWO_PI*dt;               // map to [-PI,+PI]
+        let sin = fast_sine(dt);          // occupies [-PI,+PI]
+        let cos = fast_sine(dt + PI/2.0); // occupies [-0.5*PI,+1.5*PI]
         let pll = Complex32::new(cos, sin);
         *x *= pll;
     });
