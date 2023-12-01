@@ -571,8 +571,8 @@ fn calculate_magnitude_spectrum(x: &[Complex32], y: &mut[f32]) {
     }
 }
 
-// SOURCE: https://www.embeddedrelated.com/showarticle/152.php
-//         Chebyshev polynomial which is accurate between -1.5PI to +1.5PI
+// SOURCE: https://mooooo.ooo/chebyshev-sine-approximation 
+//         Chebyshev polynomial that approximates sin(x) accurately within [-1.5*PI,+1.5*PI]
 fn fast_sine(x: f32) -> f32 {
     const A0: f32 = -0.10132118;          // x
     const A1: f32 =  0.0066208798;        // x^3
@@ -602,7 +602,7 @@ fn apply_pll(x: &mut [Complex32], freq_offset_normalised: f32) {
         let dt = dt - dt_correct*dt.signum();       // translate to [-0.5,+0.5]
         let dt = TWO_PI*dt;                         // map to [-PI,+PI]
         let sin = fast_sine(dt);                    // occupies [-PI,+PI]
-        let cos = fast_sine(dt + PI/2.0);           // occupies [-0.5*PI,+1.5PI]
+        let cos = fast_sine(dt + PI/2.0);           // occupies [-0.5*PI,+1.5*PI]
         let pll = Complex32::new(cos, sin);
         *x *= pll;
     });
