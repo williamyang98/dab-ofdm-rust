@@ -572,30 +572,31 @@ fn calculate_magnitude_spectrum(x: &[Complex32], y: &mut[f32]) {
 }
 
 // SOURCE: https://mooooo.ooo/chebyshev-sine-approximation 
-//         Chebyshev polynomial that approximates sin(x) accurately within [-1.5*PI,+1.5*PI]
+//         Chebyshev polynomial that approximates f(x) = sin(2*pi*x) accurately within [-0.75,+0.75]
 fn fast_sine(x: f32) -> f32 {
-    const A0: f32 = -0.10132118;          // x
-    const A1: f32 =  0.0066208798;        // x^3
-    const A2: f32 = -0.00017350505;       // x^5
-    const A3: f32 =  0.0000025222919;     // x^7
-    const A4: f32 = -0.000000023317787;   // x^9
-    const A5: f32 =  0.00000000013291342; // x^11
+    const A0: f32 = -25.1327419281005859375;
+    const A1: f32 =  64.83582305908203125;
+    const A2: f32 = -67.076629638671875;
+    const A3: f32 =  38.495880126953125;
+    const A4: f32 = -14.049663543701171875;
+    const A5: f32 =  3.161602020263671875;
 
-    let pi_major = 3.1415927f32;
-    let pi_minor = -0.00000008742278f32;
-    let x2 = x*x;
-    let p11 = A5;
-    let p9  = p11*x2 + A4;
-    let p7  = p9*x2  + A3;
-    let p5  = p7*x2  + A2;
-    let p3  = p5*x2  + A1;
-    let p1  = p3*x2  + A0;
-    (x-pi_major-pi_minor) * (x+pi_major+pi_minor) * p1 * x
+    // Calculate g(x) = a5*x^10 + a4*x^8 + a3*x^6 + a2*x^4 + a1*x^2 + a0
+    let z = x*x;        // z = x^2
+    let b5 = A5;        // a5*z^0
+    let b4 = b5*z + A4; // a5*z^1 + a4*z^0
+    let b3 = b4*z + A3; // a5*z^2 + a4*z^1 + a3*z^0
+    let b2 = b3*z + A2; // a5*z^3 + a4*z^2 + a3*z^1 + a2*z^0
+    let b1 = b2*z + A1; // a5*z^4 + a4*z^3 + a3*z^2 + a2*z^1 + a1*z^0
+    let b0 = b1*z + A0; // a5*z^5 + a4*z^4 + a3*z^3 + a2*z^2 + a1*z^1 + a0*z^0
+
+    // Calculate f(x) = g(x) * (x-0.5) * (x+0.5) * x
+    //           f(x) = g(x) * (x^2 - 0.25) * x
+    //           f(x) = g(x) * (z-0.25) * x
+    b0 * (z-0.25) * x
 }
 
 fn apply_pll(x: &mut [Complex32], freq_offset_normalised: f32) {
-    use std::f32::consts::PI;
-    const TWO_PI: f32 = 2.0*PI;
     x.iter_mut().enumerate().for_each(|(i, x)| {
         let dt = (i as f32)*freq_offset_normalised;
         // get absolute integer offset from [-0.5,+0.5]
@@ -604,11 +605,9 @@ fn apply_pll(x: &mut [Complex32], freq_offset_normalised: f32) {
         let dt_offset = dt.abs() - 0.5;
         let dt_offset = dt_offset.ceil();
         let dt_offset = dt_offset*dt.signum();
-
-        let dt = dt - dt_offset;          // translate to [-0.5,+0.5]
-        let dt = TWO_PI*dt;               // map to [-PI,+PI]
-        let sin = fast_sine(dt);          // occupies [-PI,+PI]
-        let cos = fast_sine(dt + PI/2.0); // occupies [-0.5*PI,+1.5*PI]
+        let dt = dt - dt_offset;        // translate to [-0.5,+0.5]
+        let sin = fast_sine(dt);        // occupies [-0.5,+0.5]
+        let cos = fast_sine(dt + 0.25); // occupies [-0.25,+0.75]
         let pll = Complex32::new(cos, sin);
         *x *= pll;
     });
